@@ -1,5 +1,6 @@
 pub mod bitboard;
 pub mod game;
+pub mod movegen;
 
 const PIECE_REPR_W: [char; 6] = ['P', 'N', 'B', 'R', 'Q', 'K'];
 const PIECE_REPR_B: [char; 6] = ['p', 'n', 'b', 'r', 'q', 'k'];
@@ -277,6 +278,28 @@ impl std::fmt::Display for Square {
     }
 }
 
+/// Checks if `square` offset by `dx` and `dy` is within bounds.
+/// Returns that new square if yes.
+///
+/// # Example
+///
+/// ```
+/// use kritisch::{try_square_offset, Square};
+///
+/// let square = Square::H7;
+/// assert!(try_square_offset(square, 1, 0).is_none());
+/// assert_eq!(try_square_offset(square, 0, 1).unwrap(), Square::H8);
+/// ```
+pub fn try_square_offset(square: Square, dx: i8, dy: i8) -> Option<Square> {
+    let (file, rank) = (square as u8 % 8, square as u8 / 8);
+    let (new_file, new_rank) = (file as i8 + dx, rank as i8 + dy);
+    if !(0..=7).contains(&new_file) || !(0..=7).contains(&new_rank) {
+        None
+    } else {
+        Some(Square::from_u8((new_rank * 8 + new_file) as u8))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     mod bitboards {
@@ -439,7 +462,7 @@ mod tests {
         #[test]
         fn piece_type() {
             let game = Game::default();
-            let black_king = game.piece_type_at(Square::E8);
+            let black_king = game.type_at(Square::E8);
             assert_eq!(black_king, Some(Piece::KING));
         }
 
@@ -466,7 +489,7 @@ mod tests {
         #[test]
         fn piece_color() {
             let game = Game::default();
-            let black_king = game.piece_color_at(Square::E8);
+            let black_king = game.color_at(Square::E8);
             assert_eq!(black_king, Some(Color::BLACK));
         }
 
@@ -504,19 +527,23 @@ mod tests {
                 start: Square::E2,
                 end: Square::E7,
             };
-            match game.make_move(m) {
-                Ok(_) => {
-                    assert_eq!(game.all_pieces().0, 18446462598732902399);
-                    assert_eq!(game.to_move, Color::BLACK);
-                    assert_eq!(game.en_passant, None);
-                    assert_eq!(game.halfmove_clock, 0);
-                    assert_eq!(game.fullmove_clock, 1);
-                }
-                Err(e) => {
-                    eprintln!("{}", e);
-                    panic!();
-                }
-            }
+            let res = game.make_move(m);
+            assert!(res.is_ok());
+            assert_eq!(game.all_pieces().0, 18446462598732902399);
+            assert_eq!(game.to_move, Color::BLACK);
+            assert_eq!(game.en_passant, None);
+            assert_eq!(game.halfmove_clock, 0);
+            assert_eq!(game.fullmove_clock, 1);
+        }
+    }
+
+    mod movegen {
+        use crate::{movegen, Square};
+
+        #[test]
+        fn pseudolegal_knight_moves() {
+            let moves = movegen::pseudolegal_knight_moves(Square::C3);
+            assert_eq!(moves.0, 43234889994);
         }
     }
 
@@ -528,6 +555,12 @@ mod tests {
             let square = Square::from_u8(15);
             let display = square.to_string();
             assert_eq!(display, String::from("h2"));
+        }
+
+        #[test]
+        fn square_parse() {
+            let square = Square::from_u8(15);
+            assert_eq!(square as u8, 15);
         }
     }
 }
