@@ -155,8 +155,8 @@ impl std::fmt::Display for Game {
 impl Game {
     /// Returns `Some(Piece)` if one of `self`'s piece bitboards
     /// contains `s` and `None` otherwise.
-    pub fn piece_type_at(&self, s: Square) -> Option<Piece> {
-        let mask = Bitboard::from_squares(vec![s]);
+    pub fn type_at(&self, s: Square) -> Option<Piece> {
+        let mask = Bitboard::from_square(s);
 
         // Checks if there is a piece bitboard that contains the given square
         // by bitAnd-ing it with a bitboard of just that square.
@@ -168,8 +168,8 @@ impl Game {
 
     /// Returns `Some(Color)` if one of `self`'s color bitboards
     /// contains `s` and `None` otherwise.
-    pub fn piece_color_at(&self, s: Square) -> Option<Color> {
-        let mask = Bitboard::from_squares(vec![s]);
+    pub fn color_at(&self, s: Square) -> Option<Color> {
+        let mask = Bitboard::from_square(s);
 
         // Checks if there is a color bitboard that contains the given square
         // by bitAnd-ing it with a bitboard of just that square.
@@ -195,15 +195,13 @@ impl Game {
         let (start, end) = (m.start, m.end);
 
         // Check if the move would capture a piece of the same color
-        if self.piece_color_at(start) == self.piece_color_at(end) {
+        if self.color_at(start) == self.color_at(end) {
             anyhow::bail!(IllegalMoveError::CaptureOwnPiece(m))
         }
 
-        let piece = self
-            .piece_type_at(start)
-            .context("No piece at starting square")?;
+        let piece = self.type_at(start).context("No piece at starting square")?;
         let color = self
-            .piece_color_at(start)
+            .color_at(start)
             .context("No piece at starting square while getting piece color")?;
 
         let is_capture = self.is_capture(m);
@@ -247,8 +245,8 @@ impl Game {
     /// Actually 'moves' a piece by creating a bitboard mask and XOR/OR-ing it with
     /// the respective color and piece bitboards
     fn move_piece(&mut self, m: Move, p: Piece, c: Color) {
-        let from_mask = Bitboard::from_squares(vec![m.start]);
-        let to_mask = Bitboard::from_squares(vec![m.end]);
+        let from_mask = Bitboard::from_square(m.start);
+        let to_mask = Bitboard::from_square(m.end);
         self.color_bitboards[c as usize] ^= from_mask;
         self.color_bitboards[c as usize] |= to_mask;
         self.piece_bitboards[p as usize] ^= from_mask;
@@ -258,7 +256,7 @@ impl Game {
     /// Handles a capture move by removing the captured piece from the board
     fn handle_capture(&mut self, m: Move, p: Piece, c: Color) -> anyhow::Result<()> {
         let captured_piece = self
-            .piece_type_at(m.end)
+            .type_at(m.end)
             .context("Tried to capture on empty square")?;
 
         let is_en_passant = if p == Piece::PAWN {
@@ -291,18 +289,18 @@ impl Game {
 
     /// Returns `true` if there is a piece on `m.end` and if
     /// it does not have the same color as the piece on `m.start`.
-    fn is_capture(&self, m: Move) -> bool {
+    pub fn is_capture(&self, m: Move) -> bool {
         if self.is_square_empty(m.end) {
             return false;
         }
-        if self.piece_color_at(m.end) == self.piece_color_at(m.start) {
+        if self.color_at(m.end) == self.color_at(m.start) {
             return false;
         }
         true
     }
 
     /// Returns `true` if `m` is one of eight possible castling moves in check.
-    fn is_castle(&self, m: Move, piece: Piece, color: Color) -> bool {
+    pub fn is_castle(&self, m: Move, piece: Piece, color: Color) -> bool {
         matches!(
             (piece, color, m.start, m.end),
             (Piece::ROOK, Color::WHITE, Square::A1, Square::D1)
@@ -316,7 +314,7 @@ impl Game {
         )
     }
 
-    fn is_en_passant(&self, m: Move, captured_piece: Piece) -> bool {
+    pub fn is_en_passant(&self, m: Move, captured_piece: Piece) -> bool {
         self.en_passant == Some(m.end) && captured_piece == Piece::PAWN
     }
 
@@ -325,10 +323,10 @@ impl Game {
     }
 
     fn remove_piece(&mut self, s: Square, piece: Piece) -> anyhow::Result<()> {
-        let mask = Bitboard::from_squares(vec![s]);
+        let mask = Bitboard::from_square(s);
 
         let color = self
-            .piece_color_at(s)
+            .color_at(s)
             .context("Tried to remove piece from empty square")?;
 
         // If a rook was captured on its initial square, update castling rights accordingly
