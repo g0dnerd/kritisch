@@ -82,6 +82,10 @@ impl std::ops::Not for Bitboard {
 }
 
 impl Bitboard {
+    pub fn from_square(s: Square) -> Self {
+        Bitboard::from_u64(0) | s.to_u64()
+    }
+
     pub fn from_squares(sq: Vec<Square>) -> Self {
         let mut out = Bitboard::from_u64(0);
         for s in sq {
@@ -94,8 +98,8 @@ impl Bitboard {
         Self(v)
     }
 
-    pub fn contains(&self, v: Square) -> bool {
-        self.0 & 1 << v as u64 != 0
+    pub fn contains(&self, s: Square) -> bool {
+        self.0 & 1 << s as u64 != 0
     }
 
     pub fn is_empty(&self) -> bool {
