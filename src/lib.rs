@@ -1,5 +1,6 @@
 pub mod bitboard;
 pub mod game;
+pub mod magics;
 pub mod movegen;
 
 const PIECE_REPR_W: [char; 6] = ['P', 'N', 'B', 'R', 'Q', 'K'];
@@ -19,6 +20,20 @@ impl Color {
         }
     }
 }
+impl std::ops::BitXor<u8> for Color {
+    type Output = Self;
+
+    fn bitxor(self, rhs: u8) -> Self::Output {
+        Color::from_u8(self as u8 ^ rhs)
+    }
+}
+
+pub struct MagicTableEntry {
+    pub mask: u64,
+    pub magic: u64,
+    pub shift: u8,
+    pub offset: u32,
+}
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum Piece {
@@ -30,6 +45,17 @@ pub enum Piece {
     KING = 5,
 }
 impl Piece {
+    pub fn from_char(c: &char) -> Self {
+        match c.to_ascii_lowercase() {
+            'p' => Self::PAWN,
+            'n' => Self::KNIGHT,
+            'b' => Self::BISHOP,
+            'r' => Self::ROOK,
+            'q' => Self::QUEEN,
+            'k' => Self::KING,
+            _ => panic!(),
+        }
+    }
     pub fn from_u8(i: u8) -> Self {
         match i {
             0 => Self::PAWN,
@@ -63,6 +89,60 @@ impl CastlingRights {
 pub struct Move {
     pub start: Square,
     pub end: Square,
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum Rank {
+    FIRST = 0,
+    SECOND = 1,
+    THIRD = 2,
+    FOURTH = 3,
+    FIFTH = 4,
+    SIXTH = 5,
+    SEVENTH = 6,
+    EIGHTH = 7,
+}
+impl Rank {
+    pub fn from_u8(r: u8) -> Self {
+        match r {
+            0 => Self::FIRST,
+            1 => Self::SECOND,
+            2 => Self::THIRD,
+            3 => Self::FOURTH,
+            4 => Self::FIFTH,
+            5 => Self::SIXTH,
+            6 => Self::SEVENTH,
+            7 => Self::EIGHTH,
+            _ => panic!(),
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum File {
+    A = 0,
+    B = 1,
+    C = 2,
+    D = 3,
+    E = 4,
+    F = 5,
+    G = 6,
+    H = 7,
+}
+impl File {
+    pub fn from_u8(f: u8) -> Self {
+        match f {
+            0 => Self::A,
+            1 => Self::B,
+            2 => Self::C,
+            3 => Self::D,
+            4 => Self::E,
+            5 => Self::F,
+            6 => Self::G,
+            7 => Self::H,
+            _ => panic!(),
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -133,6 +213,33 @@ pub enum Square {
     H8 = 63,
 }
 impl Square {
+    pub fn from_parts(c: &char, d: &char) -> anyhow::Result<Self> {
+        let file = match c {
+            'a' => 0,
+            'b' => 1,
+            'c' => 2,
+            'd' => 3,
+            'e' => 4,
+            'f' => 5,
+            'g' => 6,
+            'h' => 7,
+            _ => anyhow::bail!("File for square out of bounds while parsing square from parts"),
+        };
+
+        let rank = match d {
+            '1' => 0,
+            '2' => 1,
+            '3' => 2,
+            '4' => 3,
+            '5' => 4,
+            '6' => 5,
+            '7' => 6,
+            '8' => 7,
+            _ => anyhow::bail!("Rank for square out of bounds while parsing square from parts"),
+        };
+
+        Ok(Self::from_u8(file + rank * 8))
+    }
     pub fn from_u8(v: u8) -> Self {
         match v {
             0 => Self::A1,
@@ -199,16 +306,52 @@ impl Square {
             61 => Self::F8,
             62 => Self::G8,
             63 => Self::H8,
-            _ => panic!(),
+            _ => panic!("Unable to parse {v} to square"),
         }
     }
 
     pub fn to_u64(self) -> u64 {
         1 << self as u8
     }
+
+    pub fn get_rank(self) -> Rank {
+        Rank::from_u8(self as u8 / 8)
+    }
+
+    pub fn get_file(self) -> File {
+        File::from_u8(self as u8 % 8)
+    }
+}
+impl std::ops::Add<u8> for Square {
+    type Output = Self;
+
+    fn add(self, rhs: u8) -> Self::Output {
+        Self::from_u8(self as u8 + rhs)
+    }
+}
+impl std::ops::Add<i8> for Square {
+    type Output = Self;
+
+    fn add(self, rhs: i8) -> Self::Output {
+        Self::from_u8((self as i8 + rhs) as u8)
+    }
+}
+impl std::ops::Sub<u8> for Square {
+    type Output = Self;
+
+    fn sub(self, rhs: u8) -> Self::Output {
+        Self::from_u8(self as u8 - rhs)
+    }
+}
+impl std::ops::Sub<i8> for Square {
+    type Output = Self;
+
+    fn sub(self, rhs: i8) -> Self::Output {
+        Self::from_u8((self as i8 - rhs) as u8)
+    }
 }
 impl std::fmt::Display for Square {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
             Square::A1 => write!(f, "a1"),
             Square::B1 => write!(f, "b1"),
@@ -318,7 +461,7 @@ mod tests {
             let lhs = Bitboard::from_u64(768);
             // c2 and d2 set
             let rhs = Bitboard::from_u64(3072);
-            let res = Bitboard::from_u64(0);
+            let res = Bitboard::empty();
 
             assert_eq!(lhs & rhs, res);
         }
@@ -329,7 +472,7 @@ mod tests {
             let lhs = Bitboard::from_u64(768);
             // c2 and d2 set
             let rhs = 3072;
-            let res = Bitboard::from_u64(0);
+            let res = Bitboard::empty();
 
             assert_eq!(lhs & rhs, res);
         }
@@ -451,6 +594,21 @@ mod tests {
         use crate::{bitboard::Bitboard, game::Game, Color, Move, Piece, Square};
 
         #[test]
+        fn game_from_fen() {
+            let from_fen =
+                Game::from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+            match from_fen {
+                Ok(f) => {
+                    let default_game = Game::default();
+                    assert_eq!(f, default_game);
+                }
+                Err(_) => {
+                    panic!();
+                }
+            }
+        }
+
+        #[test]
         fn game_display() {
             let game = Game::default();
             let str = game.to_string();
@@ -504,7 +662,7 @@ mod tests {
             assert!(res.is_ok());
             assert_eq!(game.all_pieces().0, 0xffff00000010efff);
             assert_eq!(game.to_move, Color::BLACK);
-            assert_eq!(game.en_passant, None);
+            assert_eq!(game.en_passant_square, None);
             assert_eq!(game.halfmove_clock, 0);
             assert_eq!(game.fullmove_clock, 1);
         }
@@ -531,7 +689,7 @@ mod tests {
             assert!(res.is_ok());
             assert_eq!(game.all_pieces().0, 18446462598732902399);
             assert_eq!(game.to_move, Color::BLACK);
-            assert_eq!(game.en_passant, None);
+            assert_eq!(game.en_passant_square, None);
             assert_eq!(game.halfmove_clock, 0);
             assert_eq!(game.fullmove_clock, 1);
         }
