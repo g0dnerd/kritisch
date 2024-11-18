@@ -116,6 +116,30 @@ pub fn pseudolegal_knight_moves(square: Square) -> Bitboard {
     Bitboard::from_u64(KNIGHT_MOVES[square as usize])
 }
 
+/// Returns a bitboard of squares a knight on `square` can move to.
+/// This checks for positional legality, but not whether or not it leaves the king in check.
+///
+/// # Example
+///
+/// ```
+/// use kritisch::{game::Game, movegen::knight_moves, Square};
+/// let game = Game::default();
+/// let moves = knight_moves(&game, Square::G1).unwrap();
+/// assert_eq!(moves.0, 10485760);
+/// ```
+pub fn knight_moves(game: &Game, square: Square) -> anyhow::Result<Bitboard> {
+    let _ = game
+        .type_at(square)
+        .context("Could not find a knight on the given square while calculating knight moves")?;
+
+    let color = game
+        .color_at(square)
+        .context("Could not find a piece on the given square while calculating knight moves")?;
+
+    let moves = pseudolegal_knight_moves(square);
+    Ok(moves & !game.color_bitboards[color as usize])
+}
+
 /// Returns the squares a pawn on `square` could pseudolegally attack.
 /// Does NOT check for positional legality.
 ///
@@ -204,8 +228,6 @@ pub fn pawn_moves(game: &Game, square: Square) -> anyhow::Result<Bitboard> {
 /// let mut game = Game::from_fen("rnbq1bnr/pppp1ppp/6k1/4p3/4P3/1K6/PPPP1PPP/RNBQ1BNR b - - 7 5").unwrap();
 /// let moves = king_moves(&game, Color::WHITE).unwrap();
 /// assert_eq!(moves.0, 117768192);
-///
-///
 /// ```
 pub fn king_moves(game: &Game, color: Color) -> anyhow::Result<Bitboard> {
     let mut moves = Bitboard::empty();
