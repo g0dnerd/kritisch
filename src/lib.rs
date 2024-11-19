@@ -596,16 +596,10 @@ mod tests {
         #[test]
         fn game_from_fen() {
             let from_fen =
-                Game::from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
-            match from_fen {
-                Ok(f) => {
-                    let default_game = Game::default();
-                    assert_eq!(f, default_game);
-                }
-                Err(_) => {
-                    panic!();
-                }
-            }
+                Game::from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1").unwrap();
+
+            let default_game = Game::default();
+            assert_eq!(from_fen, default_game);
         }
 
         #[test]
@@ -696,12 +690,66 @@ mod tests {
     }
 
     mod movegen {
-        use crate::{movegen, Square};
+        use crate::{game::Game, movegen, Color, Square};
 
         #[test]
         fn pseudolegal_knight_moves() {
             let moves = movegen::pseudolegal_knight_moves(Square::C3);
             assert_eq!(moves.0, 43234889994);
+        }
+
+        #[test]
+        fn slider_moves() {
+            // Position after 1. e2 e4
+            let game =
+                Game::from_fen("rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2")
+                    .unwrap();
+            let moves = movegen::slider_moves(&game, Square::F1).unwrap();
+            assert_eq!(moves.0, 1108169199616);
+        }
+
+        #[test]
+        #[should_panic]
+        fn slider_moves_wrong_piece() {
+            // Position after 1. e2 e4
+            let game =
+                Game::from_fen("rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2")
+                    .unwrap();
+            let moves = movegen::slider_moves(&game, Square::E1).unwrap();
+            assert_eq!(moves.0, 1108169199616);
+        }
+
+        #[test]
+        fn pseudolegal_slider_moves() {
+            let game = Game::default();
+            let moves = movegen::pseudolegal_slider_moves(&game, Square::F1).unwrap();
+            assert_eq!(moves.0, 20480);
+        }
+
+        #[test]
+        #[should_panic]
+        fn pseudolegal_slider_moves_wrong_piece() {
+            let game = Game::default();
+            let moves = movegen::pseudolegal_slider_moves(&game, Square::E1).unwrap();
+            assert_eq!(moves.0, 20480);
+        }
+
+        #[test]
+        fn king_moves() {
+            let game =
+                Game::from_fen("rnbq1bnr/pppp1ppp/6k1/4p3/4P3/1K6/PPPP1PPP/RNBQ1BNR b - - 7 5")
+                    .unwrap();
+            let moves = movegen::king_moves(&game, Color::WHITE).unwrap();
+            assert_eq!(moves.0, 117768192);
+        }
+
+        #[test]
+        #[should_panic]
+        fn king_moves_no_king() {
+            let game =
+                Game::from_fen("rnbq1bnr/pppp1ppp/6k1/4p3/4P3/26/PPPP1PPP/RNBQ1BNR b - - 7 5")
+                    .unwrap();
+            let _ = movegen::king_moves(&game, Color::WHITE).unwrap();
         }
     }
 
@@ -719,6 +767,35 @@ mod tests {
         fn square_parse() {
             let square = Square::from_u8(15);
             assert_eq!(square as u8, 15);
+        }
+
+        #[test]
+        fn square_from_parts() {
+            let file = 'e';
+            let rank = '2';
+            let square = Square::from_parts(&file, &rank).unwrap();
+            assert_eq!(square, Square::E2);
+
+            let file = 'h';
+            let rank = '7';
+            let square = Square::from_parts(&file, &rank).unwrap();
+            assert_eq!(square, Square::H7);
+        }
+
+        #[test]
+        #[should_panic]
+        fn square_from_parts_file_oob() {
+            let file = 'i';
+            let rank = '2';
+            let _ = Square::from_parts(&file, &rank).unwrap();
+        }
+
+        #[test]
+        #[should_panic]
+        fn square_from_parts_rank_oob() {
+            let file = 'e';
+            let rank = '9';
+            let _ = Square::from_parts(&file, &rank).unwrap();
         }
     }
 }

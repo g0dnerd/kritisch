@@ -225,7 +225,7 @@ pub fn pawn_moves(game: &Game, square: Square) -> anyhow::Result<Bitboard> {
 ///
 /// ```
 /// use kritisch::{game::Game, movegen::king_moves, Color, Move, Square};
-/// let mut game = Game::from_fen("rnbq1bnr/pppp1ppp/6k1/4p3/4P3/1K6/PPPP1PPP/RNBQ1BNR b - - 7 5").unwrap();
+/// let game = Game::from_fen("rnbq1bnr/pppp1ppp/6k1/4p3/4P3/1K6/PPPP1PPP/RNBQ1BNR b - - 7 5").unwrap();
 /// let moves = king_moves(&game, Color::WHITE).unwrap();
 /// assert_eq!(moves.0, 117768192);
 /// ```
@@ -372,6 +372,10 @@ fn get_blockers_from_position(game: &Game, piece: Piece, square: Square) -> Bitb
 
     // Only return the pieces that are actually on the board
     blockers & game.all_pieces()
+}
+
+pub fn all_legal_moves(_game: &Game) -> anyhow::Result<Bitboard> {
+    todo!()
 }
 
 #[cfg(test)]
