@@ -1,29 +1,13 @@
 use crate::{
-    bitboard::Bitboard, CastlingRights, Color, File, Move, Piece, Square, PIECE_REPR_B,
+    bitboard::Bitboard,
+    magics::{BISHOP_MAGICS, BISHOP_MOVES, ROOK_MAGICS, ROOK_MOVES},
+    movegen::{get_blockers_from_position, magic_index, pseudolegal_knight_moves},
+    try_square_offset, CastlingRights, Color, File, Move, Piece, Square, PIECE_REPR_B,
     PIECE_REPR_W,
 };
 use anyhow::Context;
 
-#[derive(Debug)]
-enum IllegalMoveError {
-    CaptureOwnPiece(Move),
-}
-
-impl std::fmt::Display for IllegalMoveError {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match *self {
-            Self::CaptureOwnPiece(m) => write!(
-                f,
-                "Illegal move from {} to {} attempted - would capture own piece",
-                m.start, m.end
-            ),
-        }
-    }
-}
-
-impl std::error::Error for IllegalMoveError {}
-
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Game {
     pub color_bitboards: [Bitboard; 2],
     pub piece_bitboards: [Bitboard; 6],
@@ -171,6 +155,7 @@ impl Game {
         }
     }
     /// Tries to parse the given FEN string into a position
+    /// TODO: Parse attacks
     pub fn from_fen(fen: &'static str) -> anyhow::Result<Self> {
         let mut pos = Self::empty();
         let mut square = Square::A8;
@@ -333,20 +318,24 @@ impl Game {
     }
     /// Returns `Some(Piece)` if one of `self`'s piece bitboards
     /// contains `s` and `None` otherwise.
-    pub fn type_at(&self, s: Square) -> Option<Piece> {
+    pub fn type_at(&self, s: Square) -> Piece {
         let mask = Bitboard::from_square(s);
 
         // Checks if there is a piece bitboard that contains the given square
         // by bitAnd-ing it with a bitboard of just that square.
         // Maps the found piece value to the `Piece` enum
-        (0..=5)
+        if let Some(piece) = (0..=5)
             .find(|i| !(self.piece_bitboards[*i as usize] & mask).is_empty())
             .map(|piece_idx| Piece::from_u8(piece_idx as u8))
+        {
+            return piece;
+        } else {
+            panic!("Tried to get piece type from empty square")
+        }
     }
 
-    /// Returns `Some(Color)` if one of `self`'s color bitboards
-    /// contains `s` and `None` otherwise.
-    pub fn color_at(&self, s: Square) -> Option<Color> {
+    /// Returns the `Color` of the piece on `s`.
+    pub fn color_at(&self, s: Square) -> Color {
         let mask = Bitboard::from_square(s);
 
         // Checks if there is a color bitboard that contains the given square
@@ -355,6 +344,7 @@ impl Game {
         (0..=1)
             .find(|i| !(self.color_bitboards[*i as usize] & mask).is_empty())
             .map(|color_idx| Color::from_u8(color_idx as u8))
+            .unwrap()
     }
 
     /// Returns a combined `Bitboard` of all pieces on the board
@@ -369,22 +359,13 @@ impl Game {
 
     /// Attempts to make a move on the board. This is the lowest level of doing so and inherently
     /// only checks for very few error conditions.
-    pub fn make_move(&mut self, m: Move) -> anyhow::Result<()> {
-        let (start, end) = (m.start, m.end);
-
-        // Check if the move would capture a piece of the same color
-        if self.color_at(start) == self.color_at(end) {
-            anyhow::bail!(IllegalMoveError::CaptureOwnPiece(m))
-        }
-
-        let piece = self.type_at(start).context("No piece at starting square")?;
-        let color = self
-            .color_at(start)
-            .context("No piece at starting square while getting piece color")?;
+    pub fn make_move(&mut self, m: Move) {
+        let piece = self.type_at(m.start);
+        let color = self.color_at(m.start);
 
         let is_capture = self.is_capture(m);
 
-        let is_castle = if piece == Piece::ROOK || piece == Piece::KING {
+        let is_castle = if piece == Piece::KING {
             self.is_castle(m, piece, color)
         } else {
             false
@@ -392,15 +373,51 @@ impl Game {
 
         // If the move castles, dispatch the move handling to `self.castle` instead
         if is_castle {
-            return self.castle(m);
+            match m.end {
+                Square::C1 => self.move_piece(
+                    Move {
+                        start: Square::A1,
+                        end: Square::D1,
+                    },
+                    Piece::ROOK,
+                    color,
+                ),
+                Square::G1 => self.move_piece(
+                    Move {
+                        start: Square::H1,
+                        end: Square::F1,
+                    },
+                    Piece::ROOK,
+                    color,
+                ),
+                Square::C8 => self.move_piece(
+                    Move {
+                        start: Square::A8,
+                        end: Square::D8,
+                    },
+                    Piece::ROOK,
+                    color,
+                ),
+                Square::G8 => self.move_piece(
+                    Move {
+                        start: Square::H8,
+                        end: Square::F8,
+                    },
+                    Piece::ROOK,
+                    color,
+                ),
+                _ => panic!(
+                    "Castling to illegal square (move: {:?} {:?} -> {:?})",
+                    piece, m.start, m.end
+                ),
+            }
         }
 
         if is_capture {
-            self.handle_capture(m, piece, color)?;
+            self.handle_capture(m, piece, color);
         }
 
         // TODO: Handle promotions
-        // TODO: Where do I want to handle attack maps?
 
         self.move_piece(m, piece, color);
 
@@ -417,8 +434,6 @@ impl Game {
 
         // Change which player's turn it is
         self.to_move = self.to_move ^ 1;
-
-        Ok(())
     }
 
     /// Actually 'moves' a piece by creating a bitboard mask and XOR/OR-ing it with
@@ -433,10 +448,8 @@ impl Game {
     }
 
     /// Handles a capture move by removing the captured piece from the board
-    fn handle_capture(&mut self, m: Move, p: Piece, c: Color) -> anyhow::Result<()> {
-        let captured_piece = self
-            .type_at(m.end)
-            .context("Tried to capture on empty square")?;
+    fn handle_capture(&mut self, m: Move, p: Piece, c: Color) {
+        let captured_piece = self.type_at(m.end);
 
         let is_en_passant = if p == Piece::PAWN {
             self.is_en_passant(m, captured_piece)
@@ -448,20 +461,19 @@ impl Game {
         // If the move is en_passant, remove the piece from the EP square
         // instead of the move end square.
         if !is_en_passant {
-            self.remove_piece(m.end, captured_piece)?;
+            self.remove_piece(m.end, captured_piece);
         } else {
             match c {
                 Color::WHITE => {
                     let target_square = m.end - 8u8;
-                    self.remove_piece(target_square, captured_piece)?;
+                    self.remove_piece(target_square, captured_piece);
                 }
                 Color::BLACK => {
                     let target_square = m.end + 8u8;
-                    self.remove_piece(target_square, captured_piece)?;
+                    self.remove_piece(target_square, captured_piece);
                 }
             }
         }
-        Ok(())
     }
 
     /// Returns `true` if there is a piece on `m.end` and if
@@ -478,33 +490,37 @@ impl Game {
 
     /// Returns `true` if `m` is one of eight possible castling moves in check.
     pub fn is_castle(&self, m: Move, piece: Piece, color: Color) -> bool {
-        matches!(
-            (piece, color, m.start, m.end),
-            (Piece::ROOK, Color::WHITE, Square::A1, Square::D1)
-                | (Piece::ROOK, Color::WHITE, Square::H1, Square::F1)
-                | (Piece::KING, Color::WHITE, Square::E1, Square::C1)
-                | (Piece::KING, Color::WHITE, Square::E1, Square::G1)
-                | (Piece::ROOK, Color::BLACK, Square::A8, Square::D8)
-                | (Piece::ROOK, Color::BLACK, Square::H8, Square::F8)
-                | (Piece::KING, Color::BLACK, Square::E8, Square::C8)
-                | (Piece::KING, Color::BLACK, Square::E8, Square::G8)
-        )
+        matches!((piece, color, m.start, m.end), |(
+            Piece::KING,
+            Color::WHITE,
+            Square::E1,
+            Square::C1,
+        )| (
+            Piece::KING,
+            Color::WHITE,
+            Square::E1,
+            Square::G1
+        ) | (
+            Piece::KING,
+            Color::BLACK,
+            Square::E8,
+            Square::C8
+        ) | (
+            Piece::KING,
+            Color::BLACK,
+            Square::E8,
+            Square::G8
+        ))
     }
 
     pub fn is_en_passant(&self, m: Move, captured_piece: Piece) -> bool {
         self.en_passant_square == Some(m.end) && captured_piece == Piece::PAWN
     }
 
-    fn castle(&mut self, _m: Move) -> anyhow::Result<()> {
-        Ok(())
-    }
-
-    fn remove_piece(&mut self, s: Square, piece: Piece) -> anyhow::Result<()> {
+    fn remove_piece(&mut self, s: Square, piece: Piece) {
         let mask = Bitboard::from_square(s);
 
-        let color = self
-            .color_at(s)
-            .context("Tried to remove piece from empty square")?;
+        let color = self.color_at(s);
 
         // If a rook was captured on its initial square, update castling rights accordingly
         if piece == Piece::ROOK {
@@ -527,6 +543,116 @@ impl Game {
 
         self.color_bitboards[color as usize] ^= mask;
         self.piece_bitboards[piece as usize] ^= mask;
-        Ok(())
+    }
+
+    pub fn is_attacked_by(&self, color: Color, square: Square) -> bool {
+        match color {
+            Color::WHITE => {
+                if let Some(offset) = try_square_offset(square, -1, -1) {
+                    if (self.piece_bitboards[Piece::PAWN as usize]
+                        & self.color_bitboards[Color::WHITE as usize])
+                        .contains(offset)
+                    {
+                        return true;
+                    }
+                }
+                if let Some(offset) = try_square_offset(square, 1, -1) {
+                    if (self.piece_bitboards[Piece::PAWN as usize]
+                        & self.color_bitboards[Color::WHITE as usize])
+                        .contains(offset)
+                    {
+                        return true;
+                    }
+                }
+            }
+            Color::BLACK => {
+                if let Some(offset) = try_square_offset(square, -1, 1) {
+                    if (self.piece_bitboards[Piece::PAWN as usize]
+                        & self.color_bitboards[Color::BLACK as usize])
+                        .contains(offset)
+                    {
+                        return true;
+                    }
+                }
+                if let Some(offset) = try_square_offset(square, 1, 1) {
+                    if (self.piece_bitboards[Piece::PAWN as usize]
+                        & self.color_bitboards[Color::BLACK as usize])
+                        .contains(offset)
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        if self.is_attacked_by_knight(color, square) {
+            return true;
+        }
+        if self.is_attacked_by_king(color, square) {
+            return true;
+        }
+        self.is_attacked_by_slider(color, square)
+    }
+
+    // Returns `true` if `square` can be reached by a knight of `color`.
+    fn is_attacked_by_knight(&self, color: Color, square: Square) -> bool {
+        // Since knight moves are fully symmetrical, get knight moves from `square`
+        let mut origins = pseudolegal_knight_moves(square);
+        while !origins.is_empty() {
+            let s = Square::from_u8(origins.trailing_zeros() as u8);
+            if (self.color_bitboards[color as usize] & self.piece_bitboards[Piece::KNIGHT as usize])
+                .contains(s)
+            {
+                return true;
+            }
+            origins.clear_lsb();
+        }
+        false
+    }
+
+    // Returns `true` if `square` can be reached by the king of `color`.
+    fn is_attacked_by_king(&self, color: Color, square: Square) -> bool {
+        // Since king moves are fully symmetrical, get knight moves from `square`
+        for (dx, dy) in [
+            (-1, -1),
+            (-1, 1),
+            (1, -1),
+            (1, -1),
+            (0, -1),
+            (0, 1),
+            (-1, 0),
+            (1, 0),
+        ] {
+            if let Some(s) = try_square_offset(square, dx, dy) {
+                if (self.piece_bitboards[Piece::KING as usize]
+                    & self.color_bitboards[color as usize])
+                    .contains(s)
+                {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    fn is_attacked_by_slider(&self, color: Color, square: Square) -> bool {
+        let blockers = get_blockers_from_position(&self, Piece::QUEEN, square);
+        let mut moves = Bitboard::from_u64(
+            ROOK_MOVES[magic_index(&ROOK_MAGICS[square as usize], blockers)]
+                | BISHOP_MOVES[magic_index(&BISHOP_MAGICS[square as usize], blockers)],
+        );
+        while !moves.is_empty() {
+            let s = Square::from_u8(moves.trailing_zeros() as u8);
+            if self.color_bitboards[color as usize].contains(s) {
+                if self.piece_bitboards[Piece::ROOK as usize].contains(s)
+                    || self.piece_bitboards[Piece::BISHOP as usize].contains(s)
+                    || self.piece_bitboards[Piece::QUEEN as usize].contains(s)
+                {
+                    return true;
+                }
+            }
+            moves.clear_lsb();
+        }
+        false
     }
 }
