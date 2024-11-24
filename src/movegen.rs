@@ -1,10 +1,8 @@
-use anyhow::Context;
-
 use crate::{
     bitboard::Bitboard,
     game::Game,
     magics::{BISHOP_MAGICS, BISHOP_MOVES, ROOK_MAGICS, ROOK_MOVES},
-    try_square_offset, CastlingRights, Color, MagicTableEntry, Piece, Rank, Square,
+    try_square_offset, CastlingRights, Color, MagicTableEntry, Move, Piece, Rank, Square,
 };
 
 /// Pawn attack patterns are known at compile time and
@@ -124,20 +122,13 @@ pub fn pseudolegal_knight_moves(square: Square) -> Bitboard {
 /// ```
 /// use kritisch::{game::Game, movegen::knight_moves, Square};
 /// let game = Game::default();
-/// let moves = knight_moves(&game, Square::G1).unwrap();
+/// let moves = knight_moves(&game, Square::G1);
 /// assert_eq!(moves.0, 10485760);
 /// ```
-pub fn knight_moves(game: &Game, square: Square) -> anyhow::Result<Bitboard> {
-    let _ = game
-        .type_at(square)
-        .context("Could not find a knight on the given square while calculating knight moves")?;
-
-    let color = game
-        .color_at(square)
-        .context("Could not find a piece on the given square while calculating knight moves")?;
-
+pub fn knight_moves(game: &Game, square: Square) -> Bitboard {
+    let color = game.color_at(square);
     let moves = pseudolegal_knight_moves(square);
-    Ok(moves & !game.color_bitboards[color as usize])
+    moves & !game.color_bitboards[color as usize]
 }
 
 /// Returns the squares a pawn on `square` could pseudolegally attack.
@@ -165,15 +156,13 @@ pub fn pawn_attacks(square: Square, color: Color) -> Bitboard {
 /// ```
 /// use kritisch::{game::Game, movegen::pawn_moves, Square};
 /// let game = Game::default();
-/// let moves = pawn_moves(&game, Square::E2).unwrap();
+/// let moves = pawn_moves(&game, Square::E2);
 /// assert_eq!(moves.0, 269484032);
 /// ```
-pub fn pawn_moves(game: &Game, square: Square) -> anyhow::Result<Bitboard> {
+pub fn pawn_moves(game: &Game, square: Square) -> Bitboard {
     let mut moves = Bitboard::empty();
 
-    let color = game
-        .color_at(square)
-        .context("Tried to get color of piece on empty square while generating pawn moves")?;
+    let color = game.color_at(square);
 
     // White pawns move up, black pawns move down the board
     let direction = match color {
@@ -188,16 +177,15 @@ pub fn pawn_moves(game: &Game, square: Square) -> anyhow::Result<Bitboard> {
             moves |= offset;
 
             // If the pawn is on its initial rank, check if the square two ahead is empty
-            if color == Color::WHITE && square.get_rank() == Rank::SECOND
-                || (color == Color::BLACK && square.get_rank() == Rank::SEVENTH)
-            {
-                let rank = offset.get_rank();
-                let file = offset.get_file();
-                let two_ahead = Square::from_u8(((rank as i8 + direction) * 8 + file as i8) as u8);
-
-                if game.is_square_empty(two_ahead) {
-                    moves |= two_ahead;
+            let r = square.get_rank();
+            match (r, color) {
+                (Rank::SECOND, Color::WHITE) | (Rank::SEVENTH, Color::BLACK) => {
+                    let two_ahead = square + 16 * direction;
+                    if game.is_square_empty(two_ahead) {
+                        moves |= two_ahead;
+                    }
                 }
+                _ => (),
             }
         }
     }
@@ -205,17 +193,16 @@ pub fn pawn_moves(game: &Game, square: Square) -> anyhow::Result<Bitboard> {
     // Check for captures
     for dx in [-1, 1] {
         if let Some(offset) = try_square_offset(square, dx, direction) {
-            // If the the piece on the destination (or en passant) square has the target color,
-            // add the move
-            if let Some(target_color) = game.color_at(offset) {
-                if (color ^ 1) == target_color || game.en_passant_square == Some(offset) {
-                    moves |= offset;
-                }
+            // Add the capturing move if the target square is occupied or the current
+            // en passant target.
+            if !game.is_square_empty(offset) || game.en_passant_square == Some(offset) {
+                moves |= offset;
             }
         }
     }
 
-    Ok(moves)
+    // Remove all moves that would capture a piece of the same color
+    moves & !game.color_bitboards[color as usize]
 }
 
 /// Returns a bitboard of squares a king on `square` can move to.
@@ -226,16 +213,16 @@ pub fn pawn_moves(game: &Game, square: Square) -> anyhow::Result<Bitboard> {
 /// ```
 /// use kritisch::{game::Game, movegen::king_moves, Color, Move, Square};
 /// let game = Game::from_fen("rnbq1bnr/pppp1ppp/6k1/4p3/4P3/1K6/PPPP1PPP/RNBQ1BNR b - - 7 5").unwrap();
-/// let moves = king_moves(&game, Color::WHITE).unwrap();
+/// let moves = king_moves(&game, Color::WHITE);
 /// assert_eq!(moves.0, 117768192);
 /// ```
-pub fn king_moves(game: &Game, color: Color) -> anyhow::Result<Bitboard> {
+pub fn king_moves(game: &Game, color: Color) -> Bitboard {
     let mut moves = Bitboard::empty();
 
     let king_mask =
         game.color_bitboards[color as usize] & game.piece_bitboards[Piece::KING as usize];
     if king_mask.is_empty() {
-        anyhow::bail!("No king found");
+        panic!("No king found");
     }
     let square = Square::from_u8(king_mask.trailing_zeros() as u8);
 
@@ -256,6 +243,7 @@ pub fn king_moves(game: &Game, color: Color) -> anyhow::Result<Bitboard> {
         }
     }
 
+    // If there currently is no check given, check for castling moves
     if game.in_check.is_none() {
         match color {
             Color::WHITE => {
@@ -290,7 +278,7 @@ pub fn king_moves(game: &Game, color: Color) -> anyhow::Result<Bitboard> {
     }
 
     // Remove moves that would capture a piece of the same color before returning
-    Ok(moves & !game.color_bitboards[color as usize])
+    moves & !game.color_bitboards[color as usize]
 }
 
 /// Calculates the pseudo-legal slider moves for `square` by using the pre-calculated slider
@@ -301,29 +289,27 @@ pub fn king_moves(game: &Game, color: Color) -> anyhow::Result<Bitboard> {
 /// ```
 /// use kritisch::{movegen::pseudolegal_slider_moves, game::Game, Piece, Square};
 /// let game = Game::default();
-/// let moves = pseudolegal_slider_moves(&game, Square::F1).unwrap();
+/// let moves = pseudolegal_slider_moves(&game, Square::F1);
 /// assert_eq!(moves.0, 20480);
 /// ```
-pub fn pseudolegal_slider_moves(game: &Game, square: Square) -> anyhow::Result<Bitboard> {
-    let piece = game
-        .type_at(square)
-        .context("Tried to get slider piece for pseudolegal_slider_moves")?;
+pub fn pseudolegal_slider_moves(game: &Game, square: Square) -> Bitboard {
+    let piece = game.type_at(square);
 
     // Get the blockers for the slider type and square
     let blockers = get_blockers_from_position(game, piece, square);
 
     // Retrieve the moves from the magic table
     match piece {
-        Piece::ROOK => Ok(Bitboard::from_u64(
-            ROOK_MOVES[magic_index(&ROOK_MAGICS[square as usize], blockers)],
-        )),
-        Piece::BISHOP => Ok(Bitboard::from_u64(
-            BISHOP_MOVES[magic_index(&BISHOP_MAGICS[square as usize], blockers)],
-        )),
-        Piece::QUEEN => Ok(Bitboard::from_u64(
+        Piece::ROOK => {
+            Bitboard::from_u64(ROOK_MOVES[magic_index(&ROOK_MAGICS[square as usize], blockers)])
+        }
+        Piece::BISHOP => {
+            Bitboard::from_u64(BISHOP_MOVES[magic_index(&BISHOP_MAGICS[square as usize], blockers)])
+        }
+        Piece::QUEEN => Bitboard::from_u64(
             ROOK_MOVES[magic_index(&ROOK_MAGICS[square as usize], blockers)]
                 | BISHOP_MOVES[magic_index(&BISHOP_MAGICS[square as usize], blockers)],
-        )),
+        ),
         _ => panic!("Non-slider piece passed to `pseudolegal_slider_moves`"),
     }
 }
@@ -337,22 +323,20 @@ pub fn pseudolegal_slider_moves(game: &Game, square: Square) -> anyhow::Result<B
 /// use kritisch::{game::Game, movegen::slider_moves, Square};
 /// // Position after 1. e2 e4
 /// let game = Game::from_fen("rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2").unwrap();
-/// let moves = slider_moves(&game, Square::F1).unwrap();
+/// let moves = slider_moves(&game, Square::F1);
 /// assert_eq!(moves.0, 1108169199616);
 /// ```
-pub fn slider_moves(game: &Game, square: Square) -> anyhow::Result<Bitboard> {
-    let moves = pseudolegal_slider_moves(game, square)
-        .context("Tried to get pseudolegal slider moves to calculate legal slider moves")?;
+pub fn slider_moves(game: &Game, square: Square) -> Bitboard {
+    let moves = pseudolegal_slider_moves(game, square);
 
-    let color = game
-        .color_at(square)
-        .context("Tried to get slider color for slider_moves")?;
+    let color = game.color_at(square);
 
-    Ok(moves & !game.color_bitboards[color as usize])
+    moves & !game.color_bitboards[color as usize]
 }
 
 // Gets the index in the magic table for the given blocker mask
-fn magic_index(entry: &MagicTableEntry, mut blockers: Bitboard) -> usize {
+#[inline]
+pub fn magic_index(entry: &MagicTableEntry, mut blockers: Bitboard) -> usize {
     blockers &= entry.mask;
     let hash = blockers.0.wrapping_mul(entry.magic);
     let index = (hash >> entry.shift) as usize;
@@ -360,7 +344,7 @@ fn magic_index(entry: &MagicTableEntry, mut blockers: Bitboard) -> usize {
 }
 
 // Retrieves the blockers for a slider piece type and square from the pre-calculated magics table
-fn get_blockers_from_position(game: &Game, piece: Piece, square: Square) -> Bitboard {
+pub fn get_blockers_from_position(game: &Game, piece: Piece, square: Square) -> Bitboard {
     let blockers = match piece {
         Piece::ROOK => Bitboard::from_u64(ROOK_MAGICS[square as usize].mask),
         Piece::BISHOP => Bitboard::from_u64(BISHOP_MAGICS[square as usize].mask),
@@ -374,18 +358,80 @@ fn get_blockers_from_position(game: &Game, piece: Piece, square: Square) -> Bitb
     blockers & game.all_pieces()
 }
 
-pub fn all_legal_moves(_game: &Game) -> anyhow::Result<Bitboard> {
-    todo!()
+/// Returns all legal moves for the color to move in `game`
+/// as a `Vec<Move>`.
+/// 
+/// # Example
+/// 
+/// ```
+/// use kritisch::{game::Game, movegen::all_legal_moves, Move, Square};
+/// let game = Game::from_fen("rnb1kbnr/pppp1ppp/8/4p3/1P3P1q/8/P1PPP1PP/RNBQKBNR w KQkq - 1 3").unwrap();
+/// let moves = all_legal_moves(&game);
+/// assert_eq!(
+///     moves,
+///     vec![Move {
+///         start: Square::G2,
+///         end: Square::G3
+///     }]
+/// );
+/// ```
+pub fn all_legal_moves(game: &Game) -> Vec<Move> {
+    let color = game.to_move;
+    let mut pieces = game.all_pieces() & game.color_bitboards[color as usize];
+
+    let mut moves = Vec::new();
+
+    while !pieces.is_empty() {
+        let s = Square::from_u8(pieces.trailing_zeros() as u8);
+        let mut move_bb = match game.type_at(s) {
+            Piece::ROOK | Piece::BISHOP | Piece::QUEEN => slider_moves(game, s),
+            Piece::PAWN => pawn_moves(game, s),
+            Piece::KNIGHT => knight_moves(game, s),
+            Piece::KING => king_moves(game, color),
+        };
+
+        while !move_bb.is_empty() {
+            let sq = Square::from_u8(move_bb.trailing_zeros() as u8);
+            moves.push(Move { start: s, end: sq });
+            move_bb.clear_lsb();
+        }
+
+        pieces.clear_lsb();
+    }
+
+    moves.retain(|mv| {
+        let delete = {
+            let mut game_copy = game.clone();
+            game_copy.make_move(*mv);
+            let king_square = Square::from_u8(
+                (game_copy.color_bitboards[color as usize]
+                    & game_copy.piece_bitboards[Piece::KING as usize])
+                    .trailing_zeros() as u8,
+            );
+            game_copy.is_attacked_by(color ^ 1, king_square)
+        };
+        !delete
+    });
+
+    moves
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    extern crate test;
+    use test::Bencher;
 
     #[test]
     fn slider_blockers() {
         let game = Game::default();
         let blockers = get_blockers_from_position(&game, Piece::BISHOP, Square::F1);
         assert_eq!(blockers.0, 20480);
+    }
+
+    #[bench]
+    fn bench_blockers_from_pos(b: &mut Bencher) {
+        let game = Game::default();
+        b.iter(|| get_blockers_from_position(&game, Piece::BISHOP, Square::F1));
     }
 }
