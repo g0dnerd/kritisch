@@ -1,7 +1,10 @@
+cargo-features = ["test-dummy-unstable"]
+
 [package]
 name = "kritisch"
 version = "0.1.0"
 edition = "2021"
+im-a-teapot = true
 
 [dependencies]
 anyhow = "1.0.93"

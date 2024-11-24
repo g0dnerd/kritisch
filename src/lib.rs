@@ -1,3 +1,5 @@
+#![feature(test)]
+
 pub mod bitboard;
 pub mod game;
 pub mod magics;
@@ -434,12 +436,16 @@ impl std::fmt::Display for Square {
 /// assert_eq!(try_square_offset(square, 0, 1).unwrap(), Square::H8);
 /// ```
 pub fn try_square_offset(square: Square, dx: i8, dy: i8) -> Option<Square> {
-    let (file, rank) = (square as u8 % 8, square as u8 / 8);
-    let (new_file, new_rank) = (file as i8 + dx, rank as i8 + dy);
-    if !(0..=7).contains(&new_file) || !(0..=7).contains(&new_rank) {
-        None
-    } else {
+    let square_idx = square as i8;
+    let file = square_idx % 8;
+    let rank = square_idx / 8;
+    let new_file = file + dx;
+    let new_rank = rank + dy;
+
+    if new_file >= 0 && new_file < 8 && new_rank >= 0 && new_rank < 8 {
         Some(Square::from_u8((new_rank * 8 + new_file) as u8))
+    } else {
+        None
     }
 }
 
@@ -615,7 +621,14 @@ mod tests {
         fn piece_type() {
             let game = Game::default();
             let black_king = game.type_at(Square::E8);
-            assert_eq!(black_king, Some(Piece::KING));
+            assert_eq!(black_king, Piece::KING);
+        }
+
+        #[test]
+        #[should_panic]
+        fn piece_type_empty_square() {
+            let game = Game::default();
+            let _ = game.type_at(Square::E6);
         }
 
         #[test]
@@ -642,7 +655,14 @@ mod tests {
         fn piece_color() {
             let game = Game::default();
             let black_king = game.color_at(Square::E8);
-            assert_eq!(black_king, Some(Color::BLACK));
+            assert_eq!(black_king, Color::BLACK);
+        }
+
+        #[test]
+        #[should_panic]
+        fn piece_color_empty_square() {
+            let game = Game::default();
+            let _ = game.color_at(Square::E6);
         }
 
         #[test]
@@ -652,8 +672,7 @@ mod tests {
                 start: Square::E2,
                 end: Square::E3,
             };
-            let res = game.make_move(m);
-            assert!(res.is_ok());
+            game.make_move(m);
             assert_eq!(game.all_pieces().0, 0xffff00000010efff);
             assert_eq!(game.to_move, Color::BLACK);
             assert_eq!(game.en_passant_square, None);
@@ -661,7 +680,7 @@ mod tests {
             assert_eq!(game.fullmove_clock, 1);
         }
 
-        #[test]
+        /* #[test]
         fn make_move_illegal() {
             let mut game = Game::default();
             let m = Move {
@@ -670,7 +689,7 @@ mod tests {
             };
             let res = game.make_move(m);
             assert!(res.is_err());
-        }
+        } */
 
         #[test]
         fn make_move_capture() {
@@ -679,18 +698,29 @@ mod tests {
                 start: Square::E2,
                 end: Square::E7,
             };
-            let res = game.make_move(m);
-            assert!(res.is_ok());
+            game.make_move(m);
             assert_eq!(game.all_pieces().0, 18446462598732902399);
             assert_eq!(game.to_move, Color::BLACK);
             assert_eq!(game.en_passant_square, None);
             assert_eq!(game.halfmove_clock, 0);
             assert_eq!(game.fullmove_clock, 1);
         }
+
+        #[test]
+        fn attackers_from_fen() {
+            let game =
+                Game::from_fen("rnbqkbnr/p1pppppp/8/1p6/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2")
+                    .unwrap();
+            assert!(game.is_attacked_by(Color::WHITE, Square::B5));
+        }
     }
 
     mod movegen {
-        use crate::{game::Game, movegen, Color, Square};
+        use crate::{
+            game::Game,
+            movegen::{self, all_legal_moves},
+            Color, Move, Square,
+        };
 
         #[test]
         fn pseudolegal_knight_moves() {
@@ -704,7 +734,7 @@ mod tests {
             let game =
                 Game::from_fen("rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2")
                     .unwrap();
-            let moves = movegen::slider_moves(&game, Square::F1).unwrap();
+            let moves = movegen::slider_moves(&game, Square::F1);
             assert_eq!(moves.0, 1108169199616);
         }
 
@@ -715,14 +745,14 @@ mod tests {
             let game =
                 Game::from_fen("rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2")
                     .unwrap();
-            let moves = movegen::slider_moves(&game, Square::E1).unwrap();
+            let moves = movegen::slider_moves(&game, Square::E1);
             assert_eq!(moves.0, 1108169199616);
         }
 
         #[test]
         fn pseudolegal_slider_moves() {
             let game = Game::default();
-            let moves = movegen::pseudolegal_slider_moves(&game, Square::F1).unwrap();
+            let moves = movegen::pseudolegal_slider_moves(&game, Square::F1);
             assert_eq!(moves.0, 20480);
         }
 
@@ -730,7 +760,7 @@ mod tests {
         #[should_panic]
         fn pseudolegal_slider_moves_wrong_piece() {
             let game = Game::default();
-            let moves = movegen::pseudolegal_slider_moves(&game, Square::E1).unwrap();
+            let moves = movegen::pseudolegal_slider_moves(&game, Square::E1);
             assert_eq!(moves.0, 20480);
         }
 
@@ -739,7 +769,7 @@ mod tests {
             let game =
                 Game::from_fen("rnbq1bnr/pppp1ppp/6k1/4p3/4P3/1K6/PPPP1PPP/RNBQ1BNR b - - 7 5")
                     .unwrap();
-            let moves = movegen::king_moves(&game, Color::WHITE).unwrap();
+            let moves = movegen::king_moves(&game, Color::WHITE);
             assert_eq!(moves.0, 117768192);
         }
 
@@ -749,7 +779,137 @@ mod tests {
             let game =
                 Game::from_fen("rnbq1bnr/pppp1ppp/6k1/4p3/4P3/26/PPPP1PPP/RNBQ1BNR b - - 7 5")
                     .unwrap();
-            let _ = movegen::king_moves(&game, Color::WHITE).unwrap();
+            let _ = movegen::king_moves(&game, Color::WHITE);
+        }
+
+        #[test]
+        fn all_legal_from_initial() {
+            let game = Game::default();
+            let moves = all_legal_moves(&game);
+            assert!(!moves.is_empty());
+            assert_eq!(
+                moves,
+                [
+                    Move {
+                        start: Square::B1,
+                        end: Square::A3
+                    },
+                    Move {
+                        start: Square::B1,
+                        end: Square::C3
+                    },
+                    Move {
+                        start: Square::G1,
+                        end: Square::F3
+                    },
+                    Move {
+                        start: Square::G1,
+                        end: Square::H3
+                    },
+                    Move {
+                        start: Square::A2,
+                        end: Square::A3
+                    },
+                    Move {
+                        start: Square::A2,
+                        end: Square::A4
+                    },
+                    Move {
+                        start: Square::B2,
+                        end: Square::B3
+                    },
+                    Move {
+                        start: Square::B2,
+                        end: Square::B4
+                    },
+                    Move {
+                        start: Square::C2,
+                        end: Square::C3
+                    },
+                    Move {
+                        start: Square::C2,
+                        end: Square::C4
+                    },
+                    Move {
+                        start: Square::D2,
+                        end: Square::D3
+                    },
+                    Move {
+                        start: Square::D2,
+                        end: Square::D4
+                    },
+                    Move {
+                        start: Square::E2,
+                        end: Square::E3
+                    },
+                    Move {
+                        start: Square::E2,
+                        end: Square::E4
+                    },
+                    Move {
+                        start: Square::F2,
+                        end: Square::F3
+                    },
+                    Move {
+                        start: Square::F2,
+                        end: Square::F4
+                    },
+                    Move {
+                        start: Square::G2,
+                        end: Square::G3
+                    },
+                    Move {
+                        start: Square::G2,
+                        end: Square::G4
+                    },
+                    Move {
+                        start: Square::H2,
+                        end: Square::H3
+                    },
+                    Move {
+                        start: Square::H2,
+                        end: Square::H4
+                    }
+                ]
+            );
+        }
+
+        #[test]
+        fn all_legal_with_possible_check() {
+            let game =
+                Game::from_fen("rnbqkbnr/pppp1ppp/8/4p2Q/4P3/8/PPPP1PPP/RNB1KBNR b KQkq - 1 2")
+                    .unwrap();
+            let moves = all_legal_moves(&game);
+            for m in &moves {
+                println!("{:?}", m);
+            }
+            assert!(!moves.is_empty());
+        }
+
+        #[test]
+        fn all_legal_from_check() {
+            let game =
+                Game::from_fen("rnb1kbnr/pppp1ppp/8/4p3/1P3P1q/8/P1PPP1PP/RNBQKBNR w KQkq - 1 3")
+                    .unwrap();
+            let moves = all_legal_moves(&game);
+            assert_eq!(
+                moves,
+                vec![Move {
+                    start: Square::G2,
+                    end: Square::G3
+                }]
+            );
+        }
+
+        #[test]
+        fn all_legal_with_castling() {
+            let game =
+                Game::from_fen("r2qk2r/1ppn1ppp/p2bbn2/3p2B1/3P4/2NBPN1P/PP3PP1/R2QK2R b KQkq - 2 9").unwrap();
+            let moves = all_legal_moves(&game);
+            for m in &moves {
+                println!("{:?}", m);
+            }
+            assert!(!moves.is_empty());
         }
     }
 
@@ -796,6 +956,103 @@ mod tests {
             let file = 'e';
             let rank = '9';
             let _ = Square::from_parts(&file, &rank).unwrap();
+        }
+    }
+
+    mod bench {
+        extern crate test;
+
+        use crate::{
+            game::Game,
+            movegen::{all_legal_moves, king_moves, pawn_moves, pseudolegal_slider_moves, slider_moves},
+            try_square_offset, Color, Square,
+        };
+        use test::Bencher;
+
+        #[bench]
+        fn bench_square_offset(b: &mut Bencher) {
+            let s = Square::E4;
+            b.iter(|| try_square_offset(s, 1, -1));
+        }
+
+        #[bench]
+        fn bench_color_at(b: &mut Bencher) {
+            let g = Game::default();
+            b.iter(|| g.color_at(Square::E2));
+        }
+
+        #[bench]
+        fn bench_type_at(b: &mut Bencher) {
+            let g = Game::default();
+            b.iter(|| g.type_at(Square::E2));
+        }
+
+        #[bench]
+        fn bench_pawn_moves(b: &mut Bencher) {
+            let g = Game::default();
+            b.iter(|| pawn_moves(&g, Square::E2));
+        }
+
+        #[bench]
+        fn bench_square_get_file(b: &mut Bencher) {
+            let s = Square::E2;
+            b.iter(|| s.get_file());
+        }
+
+        #[bench]
+        fn bench_square_get_rank(b: &mut Bencher) {
+            let s = Square::E2;
+            b.iter(|| s.get_rank());
+        }
+
+        #[bench]
+        fn bench_slider_moves(b: &mut Bencher) {
+            let g = Game::from_fen("rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2")
+                .unwrap();
+            b.iter(|| slider_moves(&g, Square::F1));
+        }
+
+        #[bench]
+        fn bench_pseudo_slider_moves(b: &mut Bencher) {
+            let g = Game::from_fen("rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2")
+                .unwrap();
+            b.iter(|| pseudolegal_slider_moves(&g, Square::F1));
+        }
+
+        #[bench]
+        fn bench_king_moves(b: &mut Bencher) {
+            let g = Game::from_fen("rnbq1bnr/pppp1ppp/6k1/4p3/4P3/1K6/PPPP1PPP/RNBQ1BNR b - - 7 5")
+                .unwrap();
+            b.iter(|| king_moves(&g, Color::WHITE));
+        }
+
+        #[bench]
+        fn bench_attackers_simple(b: &mut Bencher) {
+            let game =
+                Game::from_fen("rnbqkbnr/p1pppppp/8/1p6/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2")
+                    .unwrap();
+            b.iter(|| game.is_attacked_by(Color::WHITE, Square::B5));
+        }
+
+        #[bench]
+        fn bench_attackers_complex(b: &mut Bencher) {
+            let game = Game::from_fen(
+                "r1bqk1nr/pp3pbp/2n1p1p1/2p5/3pP3/2NP1NP1/PPP2PBP/R1BQ1RK1 w kq - 0 8",
+            )
+            .unwrap();
+            b.iter(|| game.is_attacked_by(Color::WHITE, Square::H5));
+        }
+
+        #[bench]
+        fn bench_all_legal_from_default(b: &mut Bencher) {
+            let game = Game::default();
+            b.iter(|| all_legal_moves(&game));
+        }
+
+        #[bench]
+        fn bench_all_legal_from_complex(b: &mut Bencher) {
+            let game = Game::from_fen("r2qkb1r/1ppn1ppp/p3bn2/3p2B1/3P4/2N1PN1P/PP3PP1/R2QKB1R b KQkq - 0 8").unwrap();
+            b.iter(|| all_legal_moves(&game));
         }
     }
 }
